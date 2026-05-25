@@ -36,6 +36,23 @@ def save_json_file(path, data):
         json.dump(data, f, indent=4)
 
 
+def clean_text(text):
+    if not text:
+        return ""
+
+    return (
+        str(text)
+        .lower()
+        .replace("@", "")
+        .replace("(", " ")
+        .replace(")", " ")
+        .replace("_", "")
+        .replace("-", "")
+        .replace(".", "")
+        .replace(" ", "")
+    )
+
+
 def parse_score_file(raw_text):
     parts = raw_text.split("///", 1)
 
@@ -65,14 +82,30 @@ def add_stats(existing, new_stats):
 
 
 def find_verified_user(stats_json, player_data):
-    roblox_name = player_data.get("other", {}).get("name")
-    display_name = player_data.get("other", {}).get("display")
+    other = player_data.get("other", {})
+
+    stat_name = clean_text(other.get("name", ""))
+    stat_display = clean_text(other.get("display", ""))
+
+    combined_stat_text = clean_text(
+        f"{other.get('display', '')} {other.get('name', '')}"
+    )
 
     for discord_id, data in stats_json.items():
-        users = data.get("users", [])
+        for saved_user in data.get("users", []):
+            saved = clean_text(saved_user)
 
-        if roblox_name in users or display_name in users:
-            return discord_id
+            if not saved:
+                continue
+
+            if (
+                saved == stat_name
+                or saved == stat_display
+                or saved in combined_stat_text
+                or stat_name in saved
+                or stat_display in saved
+            ):
+                return discord_id
 
     return None
 
@@ -268,9 +301,8 @@ class ScoreReport(commands.Cog):
         )
 
         current_season = ensure_seasons_json(seasons_json)
-        season_data = seasons_json["seasons"][current_season]
-        season_players = season_data["players"]
-        season_records = season_data["records"]
+        season_players = seasons_json["seasons"][current_season]["players"]
+        season_records = seasons_json["seasons"][current_season]["records"]
 
         game_id = str(len(games_json) + 1)
 
