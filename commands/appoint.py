@@ -58,8 +58,16 @@ class Appoint(commands.Cog):
         if franchise_owner_role:
             await user.add_roles(franchise_owner_role)
 
+        try:
+            await user.send(
+                f"You have been appointed as Franchise Owner of **{role.name}** by **{interaction.user}**."
+            )
+        except:
+            pass
+
         await interaction.response.send_message(
-            f"Appointed {user.mention} to {role.mention}"
+            f"Appointed {user.mention} to {role.mention}",
+            ephemeral=True
         )
 
         embed = discord.Embed(
@@ -67,23 +75,9 @@ class Appoint(commands.Cog):
             color=discord.Color.green()
         )
 
-        embed.add_field(
-            name="User",
-            value=user.mention,
-            inline=False
-        )
-
-        embed.add_field(
-            name="Team",
-            value=role.mention,
-            inline=False
-        )
-
-        embed.add_field(
-            name="Appointed By",
-            value=interaction.user.mention,
-            inline=False
-        )
+        embed.add_field(name="User", value=user.mention, inline=False)
+        embed.add_field(name="Team", value=role.mention, inline=False)
+        embed.add_field(name="Appointed By", value=interaction.user.mention, inline=False)
 
         decisions_channel = self.bot.get_channel(DECISIONS_CHANNEL)
 
