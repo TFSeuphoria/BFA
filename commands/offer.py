@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import json
 import os
+import re
 
 from rolesData import COACHING_ROLES
 from channelsData import TRANSACTIONS_CHANNEL
@@ -15,6 +16,28 @@ def load_json(path):
 
     with open(path, "r") as f:
         return json.load(f)
+
+
+def get_team_emoji(team_role_id):
+    teams_json = load_json("teams.json")
+
+    for team_name, data in teams_json.items():
+        if data.get("role_id") == team_role_id:
+            return data.get("emoji", "")
+
+    return ""
+
+
+def set_embed_emoji_thumbnail(embed, emoji):
+    emoji_match = re.search(r"<a?:.+:(\d+)>", emoji)
+
+    if emoji_match:
+        emoji_id = emoji_match.group(1)
+        extension = "gif" if emoji.startswith("<a:") else "png"
+
+        embed.set_thumbnail(
+            url=f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}"
+        )
 
 
 class OfferButtons(discord.ui.View):
@@ -49,19 +72,14 @@ class OfferButtons(discord.ui.View):
         except:
             pass
 
-        teams_json = load_json("teams.json")
-
-        team_emoji = ""
-
-        for team_name, data in teams_json.items():
-            if data.get("role_id") == self.team_role.id:
-                team_emoji = data.get("emoji", "")
-                break
+        team_emoji = get_team_emoji(self.team_role.id)
 
         embed = discord.Embed(
             title="Contract Offer Accepted",
             color=discord.Color.green()
         )
+
+        set_embed_emoji_thumbnail(embed, team_emoji)
 
         embed.add_field(
             name="Player",
@@ -87,9 +105,7 @@ class OfferButtons(discord.ui.View):
             inline=False
         )
 
-        transactions_channel = self.bot.get_channel(
-            TRANSACTIONS_CHANNEL
-        )
+        transactions_channel = self.bot.get_channel(TRANSACTIONS_CHANNEL)
 
         if transactions_channel:
             await transactions_channel.send(embed=embed)
@@ -146,12 +162,7 @@ class Offer(commands.Cog):
         user: discord.Member
     ):
 
-        coach_roles = [
-            role for role in interaction.user.roles
-            if role.id in COACHING_ROLES
-        ]
-
-        if not coach_roles:
+        if not any(role.id in COACHING_ROLES for role in interaction.user.roles):
             await interaction.response.send_message(
                 "You are not team staff.",
                 ephemeral=True
@@ -163,9 +174,7 @@ class Offer(commands.Cog):
         team_role = None
 
         for team_name, data in teams_json.items():
-            role = interaction.guild.get_role(
-                data.get("role_id")
-            )
+            role = interaction.guild.get_role(data.get("role_id"))
 
             if role and role in interaction.user.roles:
                 team_role = role
@@ -179,9 +188,7 @@ class Offer(commands.Cog):
             return
 
         for team_name, data in teams_json.items():
-            role = interaction.guild.get_role(
-                data.get("role_id")
-            )
+            role = interaction.guild.get_role(data.get("role_id"))
 
             if role and role in user.roles:
                 await interaction.response.send_message(
