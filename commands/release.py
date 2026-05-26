@@ -3,93 +3,141 @@ from discord.ext import commands
 from discord import app_commands
 import json
 import os
+import re
 
 from rolesData import COACHING_ROLES
 from channelsData import TRANSACTIONS_CHANNEL
+
+
+def load_json(path):
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            json.dump({}, f, indent=4)
+
+    with open(path, "r") as f:
+        return json.load(f)
+
+
+def get_team_emoji(team_role_id):
+    teams_json = load_json("teams.json")
+
+    for team_name, data in teams_json.items():
+        if data.get("role_id") == team_role_id:
+            return data.get("emoji", "")
+
+    return ""
+
+
+def set_embed_emoji_thumbnail(embed, emoji):
+    emoji_match = re.search(r"<a?:.+:(\d+)>", emoji)
+
+    if emoji_match:
+        emoji_id = emoji_match.group(1)
+        extension = "gif" if emoji.startswith("<a:") else "png"
+
+        embed.set_thumbnail(
+            url=f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}"
+        )
 
 
 class Release(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="release", description="Release a user from your team")
+    @app_commands.command(
+        name="release",
+        description="Release a player from your team"
+    )
     async def release(
         self,
         interaction: discord.Interaction,
         user: discord.Member
     ):
 
-        if not any(r.id in COACHING_ROLES for r in interaction.user.roles):
+        if not any(role.id in COACHING_ROLES for role in interaction.user.roles):
             await interaction.response.send_message(
-                "Only team staff can use this.",
+                "You are not team staff.",
                 ephemeral=True
             )
             return
 
-        if not os.path.exists("teams.json"):
-            await interaction.response.send_message(
-                "teams.json not found.",
-                ephemeral=True
-            )
-            return
+        teams_json = load_json("teams.json")
 
-        with open("teams.json", "r") as f:
-            teams = json.load(f)
+        coach_team_role = None
 
-        staff_team_role = None
+        for team_name, data in teams_json.items():
+            role = interaction.guild.get_role(data.get("role_id"))
 
-        for team_name, data in teams.items():
-            team_role = interaction.guild.get_role(data["role_id"])
-
-            if team_role and team_role in interaction.user.roles:
-                staff_team_role = team_role
+            if role and role in interaction.user.roles:
+                coach_team_role = role
                 break
 
-        if not staff_team_role:
+        if not coach_team_role:
             await interaction.response.send_message(
-                "You are not on a registered team.",
+                "Could not determine your team.",
                 ephemeral=True
             )
             return
 
-        if staff_team_role not in user.roles:
+        if coach_team_role not in user.roles:
             await interaction.response.send_message(
                 "That user is not on your team.",
                 ephemeral=True
             )
             return
 
-        await user.remove_roles(staff_team_role)
-
-        team_count = len([
-            member for member in interaction.guild.members
-            if staff_team_role in member.roles
-        ])
+        await user.remove_roles(coach_team_role)
 
         try:
             await user.send(
-                f"You have been released from **{staff_team_role.name}** by **{interaction.user}**."
+                f"You have been released from **{coach_team_role.name}** by {interaction.user}."
             )
         except:
             pass
+
+        team_emoji = get_team_emoji(coach_team_role.id)
 
         embed = discord.Embed(
             title="Player Released",
             color=discord.Color.red()
         )
 
-        embed.add_field(name="Released User", value=user.mention, inline=False)
-        embed.add_field(name="Team", value=staff_team_role.mention, inline=False)
-        embed.add_field(name="Released By", value=interaction.user.mention, inline=False)
-        embed.add_field(name="Team Members", value=str(team_count), inline=False)
+        set_embed_emoji_thumbnail(embed, team_emoji)
 
-        transactions_channel = self.bot.get_channel(TRANSACTIONS_CHANNEL)
+        embed.add_field(
+            name="Player",
+            value=user.mention,
+            inline=False
+        )
+
+        embed.add_field(
+            name="Team",
+            value=f"{team_emoji} {coach_team_role.mention}",
+            inline=False
+        )
+
+        embed.add_field(
+            name="Released By",
+            value=interaction.user.mention,
+            inline=False
+        )
+
+        embed.add_field(
+            name="Team Members",
+            value=str(len(coach_team_role.members)),
+            inline=False
+        )
+
+        transactions_channel = self.bot.get_channel(
+            TRANSACTIONS_CHANNEL
+        )
 
         if transactions_channel:
             await transactions_channel.send(embed=embed)
 
         await interaction.response.send_message(
-            f"Released {user.mention} from {staff_team_role.mention}"
+            f"Released {user.mention} from {coach_team_role.mention}.",
+            ephemeral=True
         )
 
 
