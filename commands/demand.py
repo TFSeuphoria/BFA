@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import json
 import os
+import re
 
 from rolesData import (
     FRANCHISE_OWNER_ROLE,
@@ -10,6 +11,37 @@ from rolesData import (
 )
 
 from channelsData import TRANSACTIONS_CHANNEL
+
+
+def load_json(path):
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            json.dump({}, f, indent=4)
+
+    with open(path, "r") as f:
+        return json.load(f)
+
+
+def get_team_emoji(team_role_id):
+    teams_json = load_json("teams.json")
+
+    for team_name, data in teams_json.items():
+        if data.get("role_id") == team_role_id:
+            return data.get("emoji", "")
+
+    return ""
+
+
+def set_embed_emoji_thumbnail(embed, emoji):
+    emoji_match = re.search(r"<a?:.+:(\d+)>", emoji)
+
+    if emoji_match:
+        emoji_id = emoji_match.group(1)
+        extension = "gif" if emoji.startswith("<a:") else "png"
+
+        embed.set_thumbnail(
+            url=f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}"
+        )
 
 
 class Demand(commands.Cog):
@@ -26,20 +58,12 @@ class Demand(commands.Cog):
             )
             return
 
-        if not os.path.exists("teams.json"):
-            await interaction.response.send_message(
-                "teams.json not found.",
-                ephemeral=True
-            )
-            return
-
-        with open("teams.json", "r") as f:
-            teams = json.load(f)
+        teams_json = load_json("teams.json")
 
         user_team_role = None
 
-        for team_name, data in teams.items():
-            team_role = interaction.guild.get_role(data["role_id"])
+        for team_name, data in teams_json.items():
+            team_role = interaction.guild.get_role(data.get("role_id"))
 
             if team_role and team_role in interaction.user.roles:
                 user_team_role = team_role
@@ -68,13 +92,17 @@ class Demand(commands.Cog):
 
         await interaction.user.remove_roles(user_team_role)
 
+        team_emoji = get_team_emoji(user_team_role.id)
+
         embed = discord.Embed(
             title="Player Demand",
             color=discord.Color.orange()
         )
 
+        set_embed_emoji_thumbnail(embed, team_emoji)
+
         embed.add_field(name="Player", value=interaction.user.mention, inline=False)
-        embed.add_field(name="Team", value=user_team_role.mention, inline=False)
+        embed.add_field(name="Team", value=f"{team_emoji} {user_team_role.mention}", inline=False)
 
         transactions_channel = self.bot.get_channel(TRANSACTIONS_CHANNEL)
 
