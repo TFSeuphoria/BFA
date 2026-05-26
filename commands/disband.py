@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import json
 import os
+import re
 
 from rolesData import (
     COMMISSIONER_ROLE,
@@ -10,6 +11,37 @@ from rolesData import (
 )
 
 from channelsData import DECISIONS_CHANNEL
+
+
+def load_json(path):
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            json.dump({}, f, indent=4)
+
+    with open(path, "r") as f:
+        return json.load(f)
+
+
+def get_team_emoji(team_role_id):
+    teams_json = load_json("teams.json")
+
+    for team_name, data in teams_json.items():
+        if data.get("role_id") == team_role_id:
+            return data.get("emoji", "")
+
+    return ""
+
+
+def set_embed_emoji_thumbnail(embed, emoji):
+    emoji_match = re.search(r"<a?:.+:(\d+)>", emoji)
+
+    if emoji_match:
+        emoji_id = emoji_match.group(1)
+        extension = "gif" if emoji.startswith("<a:") else "png"
+
+        embed.set_thumbnail(
+            url=f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}"
+        )
 
 
 class Disband(commands.Cog):
@@ -31,17 +63,9 @@ class Disband(commands.Cog):
             )
             return
 
-        if not os.path.exists("teams.json"):
-            await interaction.response.send_message(
-                "teams.json not found.",
-                ephemeral=True
-            )
-            return
+        teams_json = load_json("teams.json")
 
-        with open("teams.json", "r") as f:
-            teams = json.load(f)
-
-        if team.name not in teams:
+        if team.name not in teams_json:
             await interaction.response.send_message(
                 "That role is not a registered team.",
                 ephemeral=True
@@ -51,7 +75,7 @@ class Disband(commands.Cog):
         members = [member for member in interaction.guild.members if team in member.roles]
         released_count = len(members)
 
-        coaching_role_objects = [
+        coaching_roles = [
             interaction.guild.get_role(role_id)
             for role_id in COACHING_ROLES
             if interaction.guild.get_role(role_id)
@@ -65,26 +89,29 @@ class Disband(commands.Cog):
         for member in members:
             roles_to_remove = [team]
 
-            for coach_role in coaching_role_objects:
+            for coach_role in coaching_roles:
                 if coach_role in member.roles:
                     roles_to_remove.append(coach_role)
 
             try:
                 await member.send(
-                    f"Your team **{team.name}** has been disbanded.\n"
-                    f"Reason: {reason}"
+                    f"Your team **{team.name}** has been disbanded.\nReason: {reason}"
                 )
             except:
                 pass
 
             await member.remove_roles(*roles_to_remove)
 
+        team_emoji = get_team_emoji(team.id)
+
         embed = discord.Embed(
             title="Team Disbanded",
             color=discord.Color.red()
         )
 
-        embed.add_field(name="Team", value=team.mention, inline=False)
+        set_embed_emoji_thumbnail(embed, team_emoji)
+
+        embed.add_field(name="Team", value=f"{team_emoji} {team.mention}", inline=False)
         embed.add_field(name="Disbanded By", value=interaction.user.mention, inline=False)
         embed.add_field(name="Reason", value=reason, inline=False)
         embed.add_field(name="Members Released", value=str(released_count), inline=False)
