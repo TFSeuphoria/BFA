@@ -8,169 +8,210 @@ from rolesData import COACHING_ROLES
 from channelsData import TRANSACTIONS_CHANNEL
 
 
-class OfferView(discord.ui.View):
-    def __init__(self, bot, guild_id, user_id, coach_id, team_role_id):
-        super().__init__(timeout=None)
+def load_json(path):
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            json.dump({}, f, indent=4)
+
+    with open(path, "r") as f:
+        return json.load(f)
+
+
+class OfferButtons(discord.ui.View):
+    def __init__(self, bot, coach, player, team_role):
+        super().__init__(timeout=600)
+
         self.bot = bot
-        self.guild_id = guild_id
-        self.user_id = user_id
-        self.coach_id = coach_id
-        self.team_role_id = team_role_id
+        self.coach = coach
+        self.player = player
+        self.team_role = team_role
 
     @discord.ui.button(label="Accept", style=discord.ButtonStyle.green)
-    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def accept(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
 
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This offer is not for you.", ephemeral=True)
+        if interaction.user.id != self.player.id:
+            await interaction.response.send_message(
+                "This offer is not for you.",
+                ephemeral=True
+            )
             return
 
-        guild = self.bot.get_guild(self.guild_id)
-        member = guild.get_member(self.user_id)
-        coach = guild.get_member(self.coach_id)
-        team_role = guild.get_role(self.team_role_id)
+        await self.player.add_roles(self.team_role)
 
-        if not guild or not member or not team_role:
-            await interaction.response.send_message("Something went wrong.", ephemeral=True)
-            return
+        try:
+            await self.coach.send(
+                f"{self.player} accepted the offer to {self.team_role.name}."
+            )
+        except:
+            pass
 
-        await member.add_roles(team_role)
+        teams_json = load_json("teams.json")
 
-        team_count = len([m for m in guild.members if team_role in m.roles])
+        team_emoji = ""
 
-        if coach:
-            try:
-                await coach.send(f"{member.mention} accepted the offer from {team_role.name}.")
-            except:
-                pass
+        for team_name, data in teams_json.items():
+            if data.get("role_id") == self.team_role.id:
+                team_emoji = data.get("emoji", "")
+                break
 
         embed = discord.Embed(
-            title="Offer Accepted",
+            title="Contract Offer Accepted",
             color=discord.Color.green()
         )
 
-        embed.add_field(name="Player", value=member.mention, inline=False)
-        embed.add_field(name="Team", value=team_role.mention, inline=False)
-        embed.add_field(name="Offered By", value=coach.mention if coach else "Unknown", inline=False)
-        embed.add_field(name="Team Members", value=str(team_count), inline=False)
+        embed.add_field(
+            name="Player",
+            value=self.player.mention,
+            inline=False
+        )
 
-        transactions_channel = self.bot.get_channel(TRANSACTIONS_CHANNEL)
+        embed.add_field(
+            name="Team",
+            value=f"{team_emoji} {self.team_role.mention}",
+            inline=False
+        )
+
+        embed.add_field(
+            name="Offered By",
+            value=self.coach.mention,
+            inline=False
+        )
+
+        embed.add_field(
+            name="Team Members",
+            value=str(len(self.team_role.members)),
+            inline=False
+        )
+
+        transactions_channel = self.bot.get_channel(
+            TRANSACTIONS_CHANNEL
+        )
 
         if transactions_channel:
             await transactions_channel.send(embed=embed)
 
-        await interaction.response.send_message(
-            f"You accepted the offer from {team_role.name}.",
-            ephemeral=True
-        )
+        for child in self.children:
+            child.disabled = True
 
-        self.clear_items()
-        await interaction.message.edit(view=self)
+        await interaction.response.edit_message(
+            content=f"You accepted the offer to {self.team_role.name}.",
+            view=self
+        )
 
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.red)
-    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def decline(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
 
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This offer is not for you.", ephemeral=True)
+        if interaction.user.id != self.player.id:
+            await interaction.response.send_message(
+                "This offer is not for you.",
+                ephemeral=True
+            )
             return
 
-        guild = self.bot.get_guild(self.guild_id)
-        member = guild.get_member(self.user_id)
-        coach = guild.get_member(self.coach_id)
-        team_role = guild.get_role(self.team_role_id)
+        try:
+            await self.coach.send(
+                f"{self.player} declined the offer to {self.team_role.name}."
+            )
+        except:
+            pass
 
-        if coach:
-            try:
-                await coach.send(f"{member.mention} declined the offer from {team_role.name}.")
-            except:
-                pass
+        for child in self.children:
+            child.disabled = True
 
-        await interaction.response.send_message(
-            f"You declined the offer from {team_role.name}.",
-            ephemeral=True
+        await interaction.response.edit_message(
+            content=f"You declined the offer to {self.team_role.name}.",
+            view=self
         )
-
-        self.clear_items()
-        await interaction.message.edit(view=self)
 
 
 class Offer(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="offer", description="Offer a player to join your team")
+    @app_commands.command(
+        name="offer",
+        description="Offer a player a contract"
+    )
     async def offer(
         self,
         interaction: discord.Interaction,
         user: discord.Member
     ):
 
-        if not any(r.id in COACHING_ROLES for r in interaction.user.roles):
+        coach_roles = [
+            role for role in interaction.user.roles
+            if role.id in COACHING_ROLES
+        ]
+
+        if not coach_roles:
             await interaction.response.send_message(
-                "Only team staff can use this.",
+                "You are not team staff.",
                 ephemeral=True
             )
             return
 
-        if not os.path.exists("teams.json"):
-            await interaction.response.send_message(
-                "teams.json not found.",
-                ephemeral=True
+        teams_json = load_json("teams.json")
+
+        team_role = None
+
+        for team_name, data in teams_json.items():
+            role = interaction.guild.get_role(
+                data.get("role_id")
             )
-            return
 
-        with open("teams.json", "r") as f:
-            teams = json.load(f)
-
-        coach_team_role = None
-
-        for team_name, data in teams.items():
-            team_role = interaction.guild.get_role(data["role_id"])
-
-            if team_role and team_role in interaction.user.roles:
-                coach_team_role = team_role
+            if role and role in interaction.user.roles:
+                team_role = role
                 break
 
-        if not coach_team_role:
+        if not team_role:
             await interaction.response.send_message(
-                "You are not on a registered team.",
+                "Could not determine your team.",
                 ephemeral=True
             )
             return
 
-        for team_name, data in teams.items():
-            team_role = interaction.guild.get_role(data["role_id"])
+        for team_name, data in teams_json.items():
+            role = interaction.guild.get_role(
+                data.get("role_id")
+            )
 
-            if team_role and team_role in user.roles:
+            if role and role in user.roles:
                 await interaction.response.send_message(
                     "That user is already on a team.",
                     ephemeral=True
                 )
                 return
 
-        view = OfferView(
+        view = OfferButtons(
             self.bot,
-            interaction.guild.id,
-            user.id,
-            interaction.user.id,
-            coach_team_role.id
+            interaction.user,
+            user,
+            team_role
         )
 
         try:
             await user.send(
-                f"You have been offered by **{coach_team_role.name}**.\n"
-                f"Offered by: **{interaction.user}**\n\n"
-                f"Click **Accept** to join or **Decline** to reject.",
+                f"{interaction.user} has offered you a contract to {team_role.name}.",
                 view=view
             )
+
         except:
             await interaction.response.send_message(
-                "I could not DM that user.",
+                "Could not DM that user.",
                 ephemeral=True
             )
             return
 
         await interaction.response.send_message(
-            f"Offer sent to {user.mention}.",
+            f"Sent contract offer to {user.mention}.",
             ephemeral=True
         )
 
