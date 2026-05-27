@@ -3,20 +3,15 @@ from discord.ext import commands
 from discord import app_commands
 import json
 import os
-import math
 
-from rolesData import (
-    COMMISSIONER_ROLE,
-    REFEREE_ROLE,
-    STREAMER_ROLE
-)
+from rolesData import COMMISSIONER_ROLE, REFEREE_ROLE, STREAMER_ROLE
+from channelsData import SCHEDULE_CHANNEL
 
 
 def load_json(path):
     if not os.path.exists(path):
         with open(path, "w") as f:
             json.dump({}, f, indent=4)
-
     with open(path, "r") as f:
         return json.load(f)
 
@@ -37,7 +32,7 @@ def get_record(records, team_id):
     games = wins + losses
     win_pct = wins / games if games > 0 else 0
 
-    return wins, losses, pf, pa, pd, games, win_pct
+    return wins, losses, pf, pa, pd, win_pct
 
 
 def sort_teams(teams):
@@ -54,92 +49,87 @@ def sort_teams(teams):
 
 
 def build_matchups(teams):
-    sorted_teams = sort_teams(teams)
+    teams = sort_teams(teams)
+
+    for index, team in enumerate(teams, start=1):
+        team["seed"] = index
+
     matchups = []
 
-    for i in range(0, len(sorted_teams), 2):
-        if i + 1 >= len(sorted_teams):
-            matchups.append({
-                "team1": sorted_teams[i],
-                "team2": None,
-                "primetime": False
-            })
+    for i in range(0, len(teams), 2):
+        if i + 1 >= len(teams):
+            matchups.append({"team1": teams[i], "team2": None, "primetime": False})
         else:
             matchups.append({
-                "team1": sorted_teams[i],
-                "team2": sorted_teams[i + 1],
+                "team1": teams[i],
+                "team2": teams[i + 1],
                 "primetime": i in [0, 2]
             })
 
     return matchups
 
 
-def make_schedule_embed(matchups):
+def team_line(team):
+    return (
+        f"#{team['seed']} {team['emoji']} {team['mention']} "
+        f"`{team['wins']}-{team['losses']}` PD: `{team['pd']}`"
+    )
+
+
+def make_schedule_embed(matchups, deadline, league_name):
     embed = discord.Embed(
-        title="Auto Generated Schedule",
+        title=f"{league_name} Schedule",
         color=discord.Color.blue()
     )
 
+    embed.add_field(name="Deadline", value=deadline, inline=False)
+
     lines = []
 
-    for index, matchup in enumerate(matchups, start=1):
+    for matchup in matchups:
         team1 = matchup["team1"]
         team2 = matchup["team2"]
 
         if team2 is None:
-            line = (
-                f"**Game {index}:** {team1['emoji']} {team1['mention']} "
-                f"`{team1['wins']}-{team1['losses']}` | PD: `{team1['pd']}` "
-                f"has a BYE"
-            )
-        else:
-            line = (
-                f"**Game {index}:** "
-                f"#{team1['rank']} {team1['emoji']} {team1['mention']} "
-                f"`{team1['wins']}-{team1['losses']}` PD: `{team1['pd']}` "
-                f"vs "
-                f"#{team2['rank']} {team2['emoji']} {team2['mention']} "
-                f"`{team2['wins']}-{team2['losses']}` PD: `{team2['pd']}`"
-            )
+            lines.append(f"{team_line(team1)}\n**BYE**")
+            continue
+
+        text = f"{team_line(team1)}\nvs\n{team_line(team2)}"
 
         if matchup["primetime"]:
-            line = f"⭐ **PRIMETIME** ⭐\n**{line}**"
+            text = f"⭐ **PRIMETIME** ⭐\n**{text}**"
 
-        lines.append(line)
+        lines.append(text)
 
     embed.description = "\n\n".join(lines) if lines else "No teams found."
-
     return embed
 
 
-class CreateThreadsButton(discord.ui.View):
+class CreateThreadsView(discord.ui.View):
     def __init__(self, matchups):
-        super().__init__(timeout=600)
+        super().__init__(timeout=None)
         self.matchups = matchups
         self.created = False
 
     @discord.ui.button(label="Create Threads", style=discord.ButtonStyle.green)
-    async def create_threads(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
+    async def create_threads(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         if not any(r.id == COMMISSIONER_ROLE for r in interaction.user.roles):
             await interaction.response.send_message(
-                "Only commissioners can create schedule threads.",
+                "Only commissioners can create threads.",
                 ephemeral=True
             )
             return
 
         if self.created:
             await interaction.response.send_message(
-                "Threads were already created.",
+                "Threads were already created for this schedule.",
                 ephemeral=True
             )
             return
 
         self.created = True
+        button.disabled = True
 
         created_count = 0
 
@@ -150,10 +140,8 @@ class CreateThreadsButton(discord.ui.View):
             if team2 is None:
                 continue
 
-            thread_name = f"Game {index} - {team1['name']} vs {team2['name']}"
-
             thread = await interaction.channel.create_thread(
-                name=thread_name,
+                name=f"Game {index} - {team1['name']} vs {team2['name']}",
                 type=discord.ChannelType.private_thread,
                 invitable=False
             )
@@ -164,10 +152,7 @@ class CreateThreadsButton(discord.ui.View):
                 content += f" <@&{REFEREE_ROLE}> <@&{STREAMER_ROLE}>"
 
             await thread.send(content)
-
             created_count += 1
-
-        button.disabled = True
 
         await interaction.response.edit_message(view=self)
 
@@ -181,14 +166,11 @@ class CreateSchedule(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(
-        name="createschedule",
-        description="Auto generate a schedule from standings"
-    )
+    @app_commands.command(name="createschedule", description="Create an auto-generated schedule")
     async def createschedule(
         self,
         interaction: discord.Interaction,
-        channel_id: str = None
+        deadline: str
     ):
 
         if not any(r.id == COMMISSIONER_ROLE for r in interaction.user.roles):
@@ -206,16 +188,12 @@ class CreateSchedule(commands.Cog):
         for team_name, data in teams_json.items():
             role_id = data.get("role_id")
             emoji = data.get("emoji", "")
-
             role = interaction.guild.get_role(role_id)
 
             if not role:
                 continue
 
-            wins, losses, pf, pa, pd, games, win_pct = get_record(
-                records_json,
-                role_id
-            )
+            wins, losses, pf, pa, pd, win_pct = get_record(records_json, role_id)
 
             teams.append({
                 "role_id": role_id,
@@ -227,50 +205,30 @@ class CreateSchedule(commands.Cog):
                 "pf": pf,
                 "pa": pa,
                 "pd": pd,
-                "games": games,
                 "win_pct": win_pct
             })
 
-        teams = sort_teams(teams)
-
-        for index, team in enumerate(teams, start=1):
-            team["rank"] = index
-
         matchups = build_matchups(teams)
-        embed = make_schedule_embed(matchups)
-        view = CreateThreadsButton(matchups)
+        embed = make_schedule_embed(matchups, deadline, interaction.guild.name)
 
-        if channel_id:
-            try:
-                target_channel = self.bot.get_channel(int(channel_id))
-            except:
-                target_channel = None
+        schedule_channel = self.bot.get_channel(SCHEDULE_CHANNEL)
 
-            if not target_channel:
-                await interaction.response.send_message(
-                    "Invalid channel ID.",
-                    ephemeral=True
-                )
-                return
-
-            await target_channel.send(
-                content="@everyone",
-                embed=embed,
-                view=view,
-                allowed_mentions=discord.AllowedMentions(everyone=True)
-            )
-
+        if not schedule_channel:
             await interaction.response.send_message(
-                f"Schedule sent to {target_channel.mention}.",
+                "Schedule channel not found.",
                 ephemeral=True
             )
+            return
 
-        else:
-            await interaction.response.send_message(
-                embed=embed,
-                view=view,
-                ephemeral=True
-            )
+        await schedule_channel.send(
+            embed=embed,
+            view=CreateThreadsView(matchups)
+        )
+
+        await interaction.response.send_message(
+            f"Schedule sent to {schedule_channel.mention}.",
+            ephemeral=True
+        )
 
 
 async def setup(bot):
