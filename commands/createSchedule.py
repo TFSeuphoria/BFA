@@ -4,7 +4,13 @@ from discord import app_commands
 import json
 import os
 
-from rolesData import COMMISSIONER_ROLE, REFEREE_ROLE, STREAMER_ROLE
+from rolesData import (
+    COMMISSIONER_ROLE,
+    FRANCHISE_OWNER_ROLE,
+    REFEREE_ROLE,
+    STREAMER_ROLE
+)
+
 from channelsData import SCHEDULE_CHANNEL
 
 
@@ -12,6 +18,7 @@ def load_json(path):
     if not os.path.exists(path):
         with open(path, "w") as f:
             json.dump({}, f, indent=4)
+
     with open(path, "r") as f:
         return json.load(f)
 
@@ -58,7 +65,11 @@ def build_matchups(teams):
 
     for i in range(0, len(teams), 2):
         if i + 1 >= len(teams):
-            matchups.append({"team1": teams[i], "team2": None, "primetime": False})
+            matchups.append({
+                "team1": teams[i],
+                "team2": None,
+                "primetime": False
+            })
         else:
             matchups.append({
                 "team1": teams[i],
@@ -82,7 +93,11 @@ def make_schedule_embed(matchups, deadline, league_name):
         color=discord.Color.blue()
     )
 
-    embed.add_field(name="Deadline", value=deadline, inline=False)
+    embed.add_field(
+        name="Schedule Deadline",
+        value=deadline,
+        inline=False
+    )
 
     lines = []
 
@@ -91,28 +106,55 @@ def make_schedule_embed(matchups, deadline, league_name):
         team2 = matchup["team2"]
 
         if team2 is None:
-            lines.append(f"{team_line(team1)}\n**BYE**")
+            lines.append(
+                f"{team_line(team1)}\n**BYE**"
+            )
             continue
 
-        text = f"{team_line(team1)}\nvs\n{team_line(team2)}"
+        matchup_text = (
+            f"{team_line(team1)}\n"
+            f"vs\n"
+            f"{team_line(team2)}"
+        )
 
         if matchup["primetime"]:
-            text = f"⭐ **PRIMETIME** ⭐\n**{text}**"
+            matchup_text = f"⭐ **PRIMETIME** ⭐\n**{matchup_text}**"
 
-        lines.append(text)
+        lines.append(matchup_text)
 
     embed.description = "\n\n".join(lines) if lines else "No teams found."
+
     return embed
 
 
+def find_franchise_owner(guild, team_role_id):
+    for member in guild.members:
+        has_team = any(role.id == team_role_id for role in member.roles)
+        has_owner = any(role.id == FRANCHISE_OWNER_ROLE for role in member.roles)
+
+        if has_team and has_owner:
+            return member
+
+    return None
+
+
 class CreateThreadsView(discord.ui.View):
-    def __init__(self, matchups):
+    def __init__(self, matchups, deadline):
         super().__init__(timeout=None)
+
         self.matchups = matchups
+        self.deadline = deadline
         self.created = False
 
-    @discord.ui.button(label="Create Threads", style=discord.ButtonStyle.green)
-    async def create_threads(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(
+        label="Create Threads",
+        style=discord.ButtonStyle.green
+    )
+    async def create_threads(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
 
         if not any(r.id == COMMISSIONER_ROLE for r in interaction.user.roles):
             await interaction.response.send_message(
@@ -146,12 +188,32 @@ class CreateThreadsView(discord.ui.View):
                 invitable=False
             )
 
-            content = f"{team1['mention']} {team2['mention']}"
+            team1_owner = find_franchise_owner(
+                interaction.guild,
+                team1["role_id"]
+            )
+
+            team2_owner = find_franchise_owner(
+                interaction.guild,
+                team2["role_id"]
+            )
+
+            content = (
+                f"{team1['mention']} {team2['mention']}\n"
+                f"**Schedule Deadline:** {self.deadline}"
+            )
+
+            if team1_owner:
+                content += f"\n{team1_owner.mention}"
+
+            if team2_owner:
+                content += f"\n{team2_owner.mention}"
 
             if matchup["primetime"]:
-                content += f" <@&{REFEREE_ROLE}> <@&{STREAMER_ROLE}>"
+                content += f"\n<@&{REFEREE_ROLE}> <@&{STREAMER_ROLE}>"
 
             await thread.send(content)
+
             created_count += 1
 
         await interaction.response.edit_message(view=self)
@@ -166,7 +228,10 @@ class CreateSchedule(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="createschedule", description="Create an auto-generated schedule")
+    @app_commands.command(
+        name="createschedule",
+        description="Create an auto-generated schedule"
+    )
     async def createschedule(
         self,
         interaction: discord.Interaction,
@@ -188,12 +253,16 @@ class CreateSchedule(commands.Cog):
         for team_name, data in teams_json.items():
             role_id = data.get("role_id")
             emoji = data.get("emoji", "")
+
             role = interaction.guild.get_role(role_id)
 
             if not role:
                 continue
 
-            wins, losses, pf, pa, pd, win_pct = get_record(records_json, role_id)
+            wins, losses, pf, pa, pd, win_pct = get_record(
+                records_json,
+                role_id
+            )
 
             teams.append({
                 "role_id": role_id,
@@ -209,7 +278,12 @@ class CreateSchedule(commands.Cog):
             })
 
         matchups = build_matchups(teams)
-        embed = make_schedule_embed(matchups, deadline, interaction.guild.name)
+
+        embed = make_schedule_embed(
+            matchups,
+            deadline,
+            interaction.guild.name
+        )
 
         schedule_channel = self.bot.get_channel(SCHEDULE_CHANNEL)
 
@@ -222,7 +296,7 @@ class CreateSchedule(commands.Cog):
 
         await schedule_channel.send(
             embed=embed,
-            view=CreateThreadsView(matchups)
+            view=CreateThreadsView(matchups, deadline)
         )
 
         await interaction.response.send_message(
