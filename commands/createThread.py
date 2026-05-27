@@ -1,8 +1,6 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import json
-import os
 
 from rolesData import (
     COMMISSIONER_ROLE,
@@ -28,9 +26,8 @@ class CreateThread(commands.Cog):
     async def createthread(
         self,
         interaction: discord.Interaction,
-        team1: discord.Role,
-        team2: discord.Role,
-        primetime: app_commands.Choice[str]
+        primetime: app_commands.Choice[str],
+        deadline: str
     ):
 
         if not any(r.id == COMMISSIONER_ROLE for r in interaction.user.roles):
@@ -40,37 +37,16 @@ class CreateThread(commands.Cog):
             )
             return
 
-        if not os.path.exists("teams.json"):
-            await interaction.response.send_message(
-                "teams.json not found.",
-                ephemeral=True
-            )
-            return
-
-        with open("teams.json", "r") as f:
-            teams = json.load(f)
-
-        valid_team_ids = [data["role_id"] for data in teams.values()]
-
-        if team1.id not in valid_team_ids or team2.id not in valid_team_ids:
-            await interaction.response.send_message(
-                "Both roles must be registered teams.",
-                ephemeral=True
-            )
-            return
-
-        thread_name = f"{team1.name} vs {team2.name}"
-
         thread = await interaction.channel.create_thread(
-            name=thread_name,
+            name=f"Game Thread - {deadline}",
             type=discord.ChannelType.private_thread,
             invitable=False
         )
 
-        content = f"{team1.mention} {team2.mention}"
+        content = f"**Schedule Deadline:** {deadline}"
 
         if primetime.value == "Yes":
-            content += f" <@&{REFEREE_ROLE}> <@&{STREAMER_ROLE}>"
+            content += f"\n<@&{REFEREE_ROLE}> <@&{STREAMER_ROLE}>"
 
         await thread.send(content)
 
