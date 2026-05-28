@@ -22,6 +22,7 @@ def get_user_team(guild, member):
 
     for team_name, data in teams_json.items():
         role = guild.get_role(data.get("role_id"))
+
         if role and role in member.roles:
             return role
 
@@ -55,19 +56,28 @@ async def find_game_thread(bot, guild, team1, team2):
     except:
         pass
 
+    team1_name = team1.name.lower()
+    team2_name = team2.name.lower()
+
     for thread in threads:
-        try:
-            async for msg in thread.history(limit=20):
-                content = msg.content
-                if team1.mention in content and team2.mention in content:
-                    return thread
-        except:
-            continue
+        thread_name = thread.name.lower()
+
+        if team1_name in thread_name and team2_name in thread_name:
+            return thread
 
     return None
 
 
-async def send_gametime_post(bot, team1, team2, time, date, force, primetime, requested_by):
+async def send_gametime_post(
+    bot,
+    team1,
+    team2,
+    time,
+    date,
+    force,
+    primetime,
+    requested_by
+):
     gametimes_channel = bot.get_channel(GAMETIMES_CHANNEL)
 
     if not gametimes_channel:
@@ -78,24 +88,55 @@ async def send_gametime_post(bot, team1, team2, time, date, force, primetime, re
         color=discord.Color.green()
     )
 
-    embed.add_field(name="Matchup", value=f"{team1.mention} vs {team2.mention}", inline=False)
-    embed.add_field(name="Time", value=time, inline=True)
-    embed.add_field(name="Date", value=date, inline=True)
-    embed.add_field(name="Forced", value=force, inline=True)
-    embed.add_field(name="Primetime", value=primetime, inline=True)
-    embed.add_field(name="Requested By", value=requested_by.mention, inline=False)
+    embed.add_field(
+        name="Matchup",
+        value=f"{team1.mention} vs {team2.mention}",
+        inline=False
+    )
+
+    embed.add_field(
+        name="Time",
+        value=time,
+        inline=True
+    )
+
+    embed.add_field(
+        name="Date",
+        value=date,
+        inline=True
+    )
+
+    embed.add_field(
+        name="Forced",
+        value=force,
+        inline=True
+    )
+
+    embed.add_field(
+        name="Primetime",
+        value=primetime,
+        inline=True
+    )
+
+    embed.add_field(
+        name="Requested By",
+        value=requested_by.mention,
+        inline=False
+    )
 
     content = ""
 
     if primetime == "Yes":
         content = f"<@&{REFEREE_ROLE}> <@&{STREAMER_ROLE}>"
 
-    await gametimes_channel.send(content=content, embed=embed)
+    await gametimes_channel.send(
+        content=content,
+        embed=embed
+    )
 
 
 async def dm_coaches(team1, team2, time, date, opponent_map, message_link=None):
-    guild = team1.guild
-    coaches = get_team_coaches(guild, team1) + get_team_coaches(guild, team2)
+    coaches = get_team_coaches(team1.guild, team1) + get_team_coaches(team1.guild, team2)
 
     for coach in coaches:
         opponent = opponent_map.get(coach.id)
@@ -119,6 +160,7 @@ async def dm_coaches(team1, team2, time, date, opponent_map, message_link=None):
 class GametimeRequestView(discord.ui.View):
     def __init__(self, bot, team1, team2, time, date, primetime, requested_by):
         super().__init__(timeout=None)
+
         self.bot = bot
         self.team1 = team1
         self.team2 = team2
@@ -135,14 +177,24 @@ class GametimeRequestView(discord.ui.View):
         )
 
     @discord.ui.button(label="Accept", style=discord.ButtonStyle.green)
-    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def accept(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
 
         if self.used:
-            await interaction.response.send_message("This request was already answered.", ephemeral=True)
+            await interaction.response.send_message(
+                "This request was already answered.",
+                ephemeral=True
+            )
             return
 
         if not self.is_opponent_coach(interaction.user):
-            await interaction.response.send_message("Only the opponent coaching staff can accept this.", ephemeral=True)
+            await interaction.response.send_message(
+                "Only the opponent coaching staff can accept this.",
+                ephemeral=True
+            )
             return
 
         self.used = True
@@ -188,14 +240,24 @@ class GametimeRequestView(discord.ui.View):
         await interaction.response.edit_message(view=self)
 
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.red)
-    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def decline(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
 
         if self.used:
-            await interaction.response.send_message("This request was already answered.", ephemeral=True)
+            await interaction.response.send_message(
+                "This request was already answered.",
+                ephemeral=True
+            )
             return
 
         if not self.is_opponent_coach(interaction.user):
-            await interaction.response.send_message("Only the opponent coaching staff can decline this.", ephemeral=True)
+            await interaction.response.send_message(
+                "Only the opponent coaching staff can decline this.",
+                ephemeral=True
+            )
             return
 
         self.used = True
@@ -203,7 +265,10 @@ class GametimeRequestView(discord.ui.View):
         for child in self.children:
             child.disabled = True
 
-        await interaction.message.reply("This gametime request was declined.")
+        await interaction.message.reply(
+            "This gametime request was declined."
+        )
+
         await interaction.response.edit_message(view=self)
 
 
@@ -211,7 +276,10 @@ class Gametime(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="gametime", description="Request or force a gametime")
+    @app_commands.command(
+        name="gametime",
+        description="Request or force a gametime"
+    )
     @app_commands.choices(
         force=[
             app_commands.Choice(name="Yes", value="Yes"),
@@ -328,12 +396,41 @@ class Gametime(commands.Cog):
             color=discord.Color.blue()
         )
 
-        embed.add_field(name="Requested By", value=interaction.user.mention, inline=False)
-        embed.add_field(name="Requesting Team", value=user_team.mention, inline=True)
-        embed.add_field(name="Opponent Team", value=opponent_team.mention, inline=True)
-        embed.add_field(name="Date", value=date.value, inline=True)
-        embed.add_field(name="Time", value=time, inline=True)
-        embed.add_field(name="Primetime", value=primetime.value, inline=True)
+        embed.add_field(
+            name="Requested By",
+            value=interaction.user.mention,
+            inline=False
+        )
+
+        embed.add_field(
+            name="Requesting Team",
+            value=user_team.mention,
+            inline=True
+        )
+
+        embed.add_field(
+            name="Opponent Team",
+            value=opponent_team.mention,
+            inline=True
+        )
+
+        embed.add_field(
+            name="Date",
+            value=date.value,
+            inline=True
+        )
+
+        embed.add_field(
+            name="Time",
+            value=time,
+            inline=True
+        )
+
+        embed.add_field(
+            name="Primetime",
+            value=primetime.value,
+            inline=True
+        )
 
         request_message = await thread.send(
             content=opponent_team.mention,
